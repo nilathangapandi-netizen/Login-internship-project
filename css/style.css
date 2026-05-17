@@ -1,0 +1,74 @@
+/* css/style.css */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  --primary: #2563eb;
+  --bg: #f1f5f9;
+  --card-bg: #ffffff;
+  --text: #1e293b;
+  --muted: #64748b;
+  --border: #e2e8f0;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Hero */
+.hero-box {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  padding: 3rem 2.5rem;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  max-width: 420px;
+  width: 100%;
+}
+
+/* Auth card */
+.auth-card {
+  max-width: 420px;
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+}
+
+/* Inputs */
+.form-control {
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  padding: 0.6rem 0.9rem;
+  font-size: 0.95rem;
+  transition: border-color 0.2s;
+}
+.form-control:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+}
+.form-control:disabled { background: #f8fafc; color: var(--muted); }
+
+/* Buttons */
+.btn-primary {
+  background: var(--primary);
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.6rem 1.4rem;
+  transition: background 0.2s, transform 0.1s;
+}
+.btn-primary:hover { background: #1d4ed8; transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+
+.btn-outline-secondary {
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+/* Alert messages */
+.alert { border-radius: 8px; font-size: 0.9rem; padding: 0.65rem 1rem; }
