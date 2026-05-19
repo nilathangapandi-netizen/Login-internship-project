@@ -1,77 +1,142 @@
 <?php
 
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', '1');
 
-require_once __DIR__ . '/../vendor/autoload.php';
+session_start([
+    'cookie_httponly' => true,
+    'cookie_samesite' => 'Lax',
+    'use_strict_mode' => true,
+]);
 
-// ── MySQL ──────────────────────────────────────────────────────────────────
+// ── Database configuration ─────────────────────────────────────────────────
 
 define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
 define('DB_PASS', '');
-define('DB_NAME', 'internship_db');
+define('DB_MAIN', 'internship_db');
+define('DB_ADMIN', 'admin_dashboard_db');
 
-// ── MongoDB ────────────────────────────────────────────────────────────────
+define('PASSWORD_MIN_LENGTH', 8);
 
-define('MONGO_URI', 'mongodb://localhost:27017');
-define('MONGO_DB', 'internship_profiles');
-define('MONGO_COLL', 'profiles');
-
-// ── Redis ──────────────────────────────────────────────────────────────────
-
-define('REDIS_HOST', '127.0.0.1');
-define('REDIS_PORT', 6379);
-define('SESSION_TTL', 3600);
-
-// ── JSON Response Helper ───────────────────────────────────────────────────
-
-function jsonResponse(array $data): void
+function jsonResponse(array $data, int $status = 200): void
 {
-    header('Content-Type: application/json');
-
+    if (!headers_sent()) {
+        header('Content-Type: application/json', true, $status);
+    }
     echo json_encode($data);
-
     exit;
 }
 
-// ── MySQL Connection ───────────────────────────────────────────────────────
-
-function getMySQLConn(): mysqli
+function getMySQLConn(string $database = DB_MAIN): mysqli
 {
-    $conn = new mysqli(
-        DB_HOST,
-        DB_USER,
-        DB_PASS,
-        DB_NAME
-    );
-
+    $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, $database);
     if ($conn->connect_error) {
         jsonResponse([
             'success' => false,
-            'message' => 'MySQL Connection Failed: ' . $conn->connect_error
-        ]);
+            'message' => 'Database connection failed: ' . $conn->connect_error,
+        ], 500);
     }
-
+    $conn->set_charset('utf8mb4');
     return $conn;
 }
 
-function useRedis(): bool
+function sanitizeText(string $value): string
 {
-    return class_exists('Redis');
+    return trim($value);
 }
 
-function useMongo(): bool
+function normalizeNullableValue($value)
 {
-    return class_exists('MongoDB\\Client');
+    $value = trim((string) $value);
+    return $value === '' ? null : $value;
 }
 
-function initSessionFallback(): void
+function validatePasswordStrength(string $password): bool
+{
+    return mb_strlen($password) >= PASSWORD_MIN_LENGTH;
+}
+
+function isLoggedIn(): bool
+{
+    return !empty($_SESSION['user_id']);
+}
+
+function requireLogin(): void
+{
+    if (!isLoggedIn()) {
+        jsonResponse(['success' => false, 'message' => 'Authentication required.'], 401);
+    }
+}
+
+function getCurrentUserId(): ?int
+{
+    return isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
+}
+
+function getCurrentUser(): array
+{
+    $userId = getCurrentUserId();
+    if (!$userId) {
+        return [];
+    }
+
+    $conn = getMySQLConn();
+    $stmt = $conn->prepare('SELECT id, name, username, email, age, dob, country, state, city, pincode, contact, bio FROM users WHERE id = ? LIMIT 1');
+    $stmt->bind_param('i', $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $user = $result->fetch_assoc() ?: [];
+    $stmt->close();
+    $conn->close();
+
+    return $user;
+}
+
+function isUniqueUserIdentity(string $username, string $email, ?int $excludeId = null): bool
+{
+    $conn = getMySQLConn();
+    $query = 'SELECT id FROM users WHERE (username = ? OR email = ?)';
+    if ($excludeId !== null) {
+        $query .= ' AND id <> ?';
+    }
+    $query .= ' LIMIT 1';
+
+    $stmt = $conn->prepare($query);
+    if ($excludeId !== null) {
+        $stmt->bind_param('ssi', $username, $email, $excludeId);
+    } else {
+        $stmt->bind_param('ss', $username, $email);
+    }
+    $stmt->execute();
+    $stmt->store_result();
+    $exists = $stmt->num_rows > 0;
+    $stmt->close();
+    $conn->close();
+
+    return !$exists;
+}
+
+function syncProfileToAdminDatabase(array $profile): void
+{
+    $conn = getAdminMySQLConn();
+    $stmt = $conn->prepare('INSERT INTO user_profiles (user_id, name, email, username, age, dob, country, state, city, pincode, contact, bio, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), username = VALUES(username), age = VALUES(age), dob = VALUES(dob), country = VALUES(country), state = VALUES(state), city = VALUES(city), pincode = VALUES(pincode), contact = VALUES(contact), bio = VALUES(bio), updated_at = NOW()');
+    $stmt->bind_param('ississsssss', $profile['user_id'], $profile['name'], $profile['email'], $profile['username'], $profile['age'], $profile['dob'], $profile['country'], $profile['state'], $profile['city'], $profile['pincode'], $profile['contact'], $profile['bio']);
+    $stmt->execute();
+    $stmt->close();
+    $conn->close();
+}
+
+function getAdminMySQLConn(): mysqli
+{
+    return getMySQLConn(DB_ADMIN);
+}
+
+function initSessionTokenStorage(): void
 {
     if (session_status() === PHP_SESSION_NONE) {
         session_start();
     }
-
     if (!isset($_SESSION['sessions']) || !is_array($_SESSION['sessions'])) {
         $_SESSION['sessions'] = [];
     }
@@ -79,94 +144,35 @@ function initSessionFallback(): void
 
 function saveSessionByToken(string $token, array $payload): void
 {
-    if (useRedis()) {
-        $redis = getRedis();
-        $redis->setex("session:$token", SESSION_TTL, json_encode($payload));
-        return;
-    }
-
-    initSessionFallback();
+    initSessionTokenStorage();
     $_SESSION['sessions'][$token] = $payload;
 }
 
 function deleteSessionByToken(string $token): void
 {
-    if (useRedis()) {
-        $redis = getRedis();
-        $redis->del("session:$token");
-        return;
-    }
-
-    initSessionFallback();
+    initSessionTokenStorage();
     unset($_SESSION['sessions'][$token]);
 }
 
 function getSessionByToken(string $token): ?array
 {
-    if (useRedis()) {
-        $redis = getRedis();
-        $data = $redis->get("session:$token");
-
-        return $data ? json_decode($data, true) : null;
-    }
-
-    initSessionFallback();
-
+    initSessionTokenStorage();
     return $_SESSION['sessions'][$token] ?? null;
 }
-
-// ── MongoDB Collection ─────────────────────────────────────────────────────
-
-function getMongoCollection(): MongoDB\Collection
-{
-    if (!useMongo()) {
-        jsonResponse([
-            'success' => false,
-            'message' => 'MongoDB extension is not installed.'
-        ]);
-    }
-
-    $client = new MongoDB\Client(MONGO_URI);
-
-    return $client->selectCollection(
-        MONGO_DB,
-        MONGO_COLL
-    );
-}
-
-// ── Redis Connection ───────────────────────────────────────────────────────
-
-function getRedis(): Redis
-{
-    if (!useRedis()) {
-        jsonResponse([
-            'success' => false,
-            'message' => 'Redis extension is not installed.'
-        ]);
-    }
-
-    $redis = new Redis();
-    $redis->connect(
-        REDIS_HOST,
-        REDIS_PORT
-    );
-
-    return $redis;
-}
-
-// ── Generate Session Token ─────────────────────────────────────────────────
 
 function generateToken(): string
 {
     return bin2hex(random_bytes(32));
 }
 
-// ── Validate Token ─────────────────────────────────────────────────────────
-
 function validateToken(string $token): ?array
 {
     return getSessionByToken($token);
 }
+
+
+
+
 
 // ── CORS Headers ───────────────────────────────────────────────────────────
 

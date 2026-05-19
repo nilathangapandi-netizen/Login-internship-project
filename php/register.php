@@ -1,61 +1,150 @@
 <?php
 // php/register.php
+
 require_once __DIR__ . '/config.php';
 
-$input = json_decode(file_get_contents('php://input'), true);
+header('Content-Type: application/json');
 
-$name     = sanitizeText($input['name'] ?? '');
-$email    = sanitizeText($input['email'] ?? '');
-$username = sanitizeText($input['username'] ?? '');
-$password = trim($input['password'] ?? '');
+try {
 
-if (!$name || !$email || !$username || !$password) {
-    jsonResponse(['success' => false, 'message' => 'All fields are required.'], 400);
-}
+    $input = json_decode(
+        file_get_contents('php://input'),
+        true
+    );
 
-if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-    jsonResponse(['success' => false, 'message' => 'Invalid email address.'], 400);
-}
+    if (!$input) {
 
-if (!validatePasswordStrength($password)) {
-    jsonResponse(['success' => false, 'message' => 'Password must be at least ' . PASSWORD_MIN_LENGTH . ' characters long.'], 400);
-}
+        jsonResponse([
+            'success' => false,
+            'message' => 'Invalid request.'
+        ]);
+    }
 
-if (!isUniqueUserIdentity($username, $email)) {
-    jsonResponse(['success' => false, 'message' => 'Username or email already exists.'], 409);
-}
+    // Clean values
+    $name = sanitizeText($input['name'] ?? '');
 
-$conn = getMySQLConn();
-$stmt = $conn->prepare(
-    'INSERT INTO users (name, email, username, password_hash, created_at, updated_at)
-     VALUES (?, ?, ?, ?, NOW(), NOW())'
-);
-$hash = password_hash($password, PASSWORD_DEFAULT);
-$stmt->bind_param('ssss', $name, $email, $username, $hash);
+    $email = sanitizeText($input['email'] ?? '');
 
-if (!$stmt->execute()) {
+    $username = sanitizeText($input['username'] ?? '');
+
+    $password = trim($input['password'] ?? '');
+
+    // Validation
+    if (!$name || !$email || !$username || !$password) {
+
+        jsonResponse([
+            'success' => false,
+            'message' => 'All fields are required.'
+        ]);
+    }
+
+    // Email validation
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+
+        jsonResponse([
+            'success' => false,
+            'message' => 'Invalid email address.'
+        ]);
+    }
+
+    // Password validation
+    if (!validatePasswordStrength($password)) {
+
+        jsonResponse([
+            'success' => false,
+            'message' =>
+                'Password must be at least '
+                . PASSWORD_MIN_LENGTH .
+                ' characters long.'
+        ]);
+    }
+
+    // Duplicate check
+    if (!isUniqueUserIdentity($username, $email)) {
+
+        jsonResponse([
+            'success' => false,
+            'message' => 'Username or email already exists.'
+        ]);
+    }
+
+    // Database connection
+    $conn = getMySQLConn();
+
+    // Hash password
+    $hash = password_hash(
+        $password,
+        PASSWORD_DEFAULT
+    );
+
+    // Insert user
+    $stmt = $conn->prepare("
+        INSERT INTO users (
+            name,
+            email,
+            username,
+            password_hash,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, NOW(), NOW())
+    ");
+
+    $stmt->bind_param(
+        'ssss',
+        $name,
+        $email,
+        $username,
+        $hash
+    );
+
+    $stmt->execute();
+
+    $userId = $stmt->insert_id;
+
     $stmt->close();
+
     $conn->close();
-    jsonResponse(['success' => false, 'message' => 'Registration failed. Please try again.'], 500);
+
+    // Sync admin dashboard
+    // syncProfileToAdminDatabase([
+
+    //     'user_id'  => $userId,
+
+    //     'name'     => $name,
+
+    //     'email'    => $email,
+
+    //     'username' => $username,
+
+    //     'age'      => null,
+
+    //     'dob'      => null,
+
+    //     'country'  => null,
+
+    //     'state'    => null,
+
+    //     'city'     => null,
+
+    //     'pincode'  => null,
+
+    //     'contact'  => null,
+
+    //     'bio'      => null,
+    // ]);
+
+    // Success
+    jsonResponse([
+        'success' => true,
+        'message' => 'Registration successful.'
+    ]);
+
+} catch (Exception $e) {
+
+    jsonResponse([
+        'success' => false,
+        'message' => 'Server error.',
+        'error'   => $e->getMessage()
+    ]);
 }
-
-$userId = $stmt->insert_id;
-$stmt->close();
-$conn->close();
-
-syncProfileToAdminDatabase([
-    'user_id'  => $userId,
-    'name'     => $name,
-    'email'    => $email,
-    'username' => $username,
-    'age'      => null,
-    'dob'      => null,
-    'country'  => null,
-    'state'    => null,
-    'city'     => null,
-    'pincode'  => null,
-    'contact'  => null,
-    'bio'      => null,
-]);
-
-jsonResponse(['success' => true]);

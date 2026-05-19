@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Internship Project – Register › Login › Profile
 
 ## Tech Stack
@@ -139,3 +140,6 @@ internship-project/
 - All MySQL queries use prepared statements
 - AJAX-only — no HTML form submissions
 - Bootstrap 5 provides responsive layout
+=======
+# Login-internship-project
+>>>>>>> 8dfe06c9fea997aa1227af3fb543381fe8fdb9d5
